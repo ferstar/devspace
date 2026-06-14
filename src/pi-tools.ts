@@ -15,10 +15,16 @@ import {
   type WriteToolInput,
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
-import type { ServerConfig } from "./config.js";
-import { assertAllowedPath, resolveAllowedPath } from "./roots.js";
+import { resolveAllowedPath } from "./roots.js";
 
 type McpContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+export type ToolResponse = { content: McpContent[]; isError?: boolean };
+
+interface ToolContext {
+  cwd: string;
+  root: string;
+  agentsNotice?: string;
+}
 
 function toMcpContent(result: AgentToolResult<unknown>): McpContent[] {
   return result.content.map((content) => {
@@ -42,109 +48,79 @@ function formatToolError(error: unknown): McpContent[] {
 async function runTool<TInput>(
   execute: (input: TInput) => Promise<AgentToolResult<unknown>>,
   input: TInput,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
+  context: ToolContext,
+): Promise<ToolResponse> {
   try {
     const result = await execute(input);
-    return { content: toMcpContent(result) };
+    return { content: appendAgentsNotice(toMcpContent(result), context.agentsNotice) };
   } catch (error) {
-    return { content: formatToolError(error), isError: true };
+    return { content: appendAgentsNotice(formatToolError(error), context.agentsNotice), isError: true };
   }
 }
 
-function defaultCwd(config: ServerConfig): string {
-  return config.allowedRoots[0] ?? process.cwd();
+function appendAgentsNotice(content: McpContent[], agentsNotice: string | undefined): McpContent[] {
+  if (!agentsNotice) return content;
+  return [...content, { type: "text", text: agentsNotice }];
 }
 
-function resolveToolCwd(cwd: string | undefined, config: ServerConfig): string {
-  return assertAllowedPath(cwd ?? defaultCwd(config), config.allowedRoots);
-}
-
-export async function readFileTool(
-  input: ReadToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  const path = resolveAllowedPath(input.path, cwd, config.allowedRoots);
-  const tool = createReadTool(cwd);
+export async function readFileTool(input: ReadToolInput, context: ToolContext): Promise<ToolResponse> {
+  const path = resolveAllowedPath(input.path, context.cwd, [context.root]);
+  const tool = createReadTool(context.cwd);
 
   return runTool((params) => tool.execute("read_file", params), {
     path,
     offset: input.offset,
     limit: input.limit,
-  });
+  }, context);
 }
 
-export async function writeFileTool(
-  input: WriteToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  const path = resolveAllowedPath(input.path, cwd, config.allowedRoots);
-  const tool = createWriteTool(cwd);
+export async function writeFileTool(input: WriteToolInput, context: ToolContext): Promise<ToolResponse> {
+  const path = resolveAllowedPath(input.path, context.cwd, [context.root]);
+  const tool = createWriteTool(context.cwd);
 
   return runTool((params) => tool.execute("write_file", params), {
     path,
     content: input.content,
-  });
+  }, context);
 }
 
-export async function editFileTool(
-  input: EditToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  const path = resolveAllowedPath(input.path, cwd, config.allowedRoots);
-  const tool = createEditTool(cwd);
+export async function editFileTool(input: EditToolInput, context: ToolContext): Promise<ToolResponse> {
+  const path = resolveAllowedPath(input.path, context.cwd, [context.root]);
+  const tool = createEditTool(context.cwd);
 
   return runTool((params) => tool.execute("edit_file", params), {
     path,
     edits: input.edits,
-  });
+  }, context);
 }
 
-export async function grepFilesTool(
-  input: GrepToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  if (input.path) resolveAllowedPath(input.path, cwd, config.allowedRoots);
-  const tool = createGrepTool(cwd);
+export async function grepFilesTool(input: GrepToolInput, context: ToolContext): Promise<ToolResponse> {
+  if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
+  const tool = createGrepTool(context.cwd);
 
-  return runTool((params) => tool.execute("grep_files", params), input);
+  return runTool((params) => tool.execute("grep_files", params), input, context);
 }
 
-export async function findFilesTool(
-  input: FindToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  if (input.path) resolveAllowedPath(input.path, cwd, config.allowedRoots);
-  const tool = createFindTool(cwd);
+export async function findFilesTool(input: FindToolInput, context: ToolContext): Promise<ToolResponse> {
+  if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
+  const tool = createFindTool(context.cwd);
 
-  return runTool((params) => tool.execute("find_files", params), input);
+  return runTool((params) => tool.execute("find_files", params), input, context);
 }
 
-export async function listDirectoryTool(
-  input: LsToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  if (input.path) resolveAllowedPath(input.path, cwd, config.allowedRoots);
-  const tool = createLsTool(cwd);
+export async function listDirectoryTool(input: LsToolInput, context: ToolContext): Promise<ToolResponse> {
+  if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
+  const tool = createLsTool(context.cwd);
 
-  return runTool((params) => tool.execute("list_directory", params), input);
+  return runTool((params) => tool.execute("list_directory", params), input, context);
 }
 
-export async function runShellTool(
-  input: BashToolInput & { cwd?: string },
-  config: ServerConfig,
-): Promise<{ content: McpContent[]; isError?: boolean }> {
-  const cwd = resolveToolCwd(input.cwd, config);
-  const tool = createBashTool(cwd);
+export async function runShellTool(input: BashToolInput, context: ToolContext): Promise<ToolResponse> {
+  const tool = createBashTool(context.cwd);
   const timeout = input.timeout === undefined ? 30 : Math.min(input.timeout, 300);
 
   return runTool((params) => tool.execute("run_shell", params), {
     command: input.command,
     timeout,
-  });
+  }, context);
 }

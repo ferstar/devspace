@@ -15,6 +15,7 @@ import {
   runShellTool,
   writeFileTool,
 } from "./pi-tools.js";
+import { formatAgentsNotice, WorkspaceRegistry } from "./workspaces.js";
 
 type Transport = StreamableHTTPServerTransport;
 
@@ -39,8 +40,9 @@ function sendJsonRpcError(res: Response, status: number, code: number, message: 
 }
 
 function createMcpServer(config: ServerConfig): McpServer {
+  const workspaces = new WorkspaceRegistry(config);
   const server = new McpServer({
-    name: "pi-on-mcp",
+    name: "local-coding-workspace",
     version: "0.1.0",
   });
 
@@ -58,8 +60,11 @@ function createMcpServer(config: ServerConfig): McpServer {
           text: JSON.stringify(
             {
               name: "pi-on-mcp",
+              mcpName: "local-coding-workspace",
               allowedRoots: config.allowedRoots,
               mutationToolsEnabled: true,
+              workflow:
+                "Call open_workspace first, then use the returned workspaceId for read, edit, search, list, and shell tools.",
             },
             null,
             2,
@@ -70,44 +75,95 @@ function createMcpServer(config: ServerConfig): McpServer {
   );
 
   server.registerTool(
+    "open_workspace",
+    {
+      title: "Open workspace",
+      description:
+        "Open a local project directory as a coding workspace. Call this before reading, editing, searching, or running commands. The result includes any AGENTS.md instructions discovered at the workspace root.",
+      inputSchema: {
+        path: z.string().describe("Absolute path to a local project directory inside an allowed root."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ path }) => {
+      const { workspace, agentsFiles } = await workspaces.openWorkspace(path);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                workspaceId: workspace.id,
+                root: workspace.root,
+                loadedAgentsFiles: agentsFiles.map((file) => ({
+                  path: file.path,
+                  alreadyLoaded: file.alreadyLoaded,
+                })),
+                instruction:
+                  "Use this workspaceId in all subsequent tool calls for this project. Follow the AGENTS.md context returned below.",
+              },
+              null,
+              2,
+            ),
+          },
+          ...(formatAgentsNotice(agentsFiles) ? [{ type: "text" as const, text: formatAgentsNotice(agentsFiles)! }] : []),
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     "read_file",
     {
       title: "Read file",
-      description: "Read a file from an allowed local root.",
+      description:
+        "Read a file inside an open workspace. Call open_workspace first, then pass workspaceId. If the file path enters a directory with an AGENTS.md that has not been loaded yet, that AGENTS.md is returned with the tool result.",
       inputSchema: {
-        path: z.string().describe("File path to read, relative to cwd or absolute within an allowed root."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
+        path: z.string().describe("File path to read, relative to the workspace root."),
         offset: z.number().int().positive().optional().describe("1-indexed line number to start reading from."),
         limit: z.number().int().positive().optional().describe("Maximum number of lines to read."),
       },
       annotations: { readOnlyHint: true },
     },
-    async (input) => readFileTool(input, config),
+    async ({ workspaceId, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const targetPath = workspaces.resolvePath(workspace, input.path);
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForPath(workspace, targetPath));
+      return readFileTool(input, { cwd: workspace.root, root: workspace.root, agentsNotice });
+    },
   );
 
   server.registerTool(
     "write_file",
     {
       title: "Write file",
-      description: "Write a complete file under an allowed local root.",
+      description:
+        "Write a complete file inside an open workspace. Prefer edit_file for targeted changes. Call open_workspace first and pass workspaceId.",
       inputSchema: {
-        path: z.string().describe("File path to write, relative to cwd or absolute within an allowed root."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
+        path: z.string().describe("File path to write, relative to the workspace root."),
         content: z.string().describe("Complete new file content."),
       },
       annotations: { destructiveHint: true },
     },
-    async (input) => writeFileTool(input, config),
+    async ({ workspaceId, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const targetPath = workspaces.resolvePath(workspace, input.path);
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForPath(workspace, targetPath));
+      return writeFileTool(input, { cwd: workspace.root, root: workspace.root, agentsNotice });
+    },
   );
 
   server.registerTool(
     "edit_file",
     {
       title: "Edit file",
-      description: "Edit one file by replacing exact text blocks under an allowed local root.",
+      description:
+        "Edit one file inside an open workspace by replacing exact text blocks. Prefer this over write_file for small changes. Call open_workspace first and pass workspaceId.",
       inputSchema: {
-        path: z.string().describe("File path to edit, relative to cwd or absolute within an allowed root."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
+        path: z.string().describe("File path to edit, relative to the workspace root."),
         edits: z
           .array(
             z.object({
@@ -119,52 +175,73 @@ function createMcpServer(config: ServerConfig): McpServer {
       },
       annotations: { destructiveHint: true },
     },
-    async (input) => editFileTool(input, config),
+    async ({ workspaceId, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const targetPath = workspaces.resolvePath(workspace, input.path);
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForPath(workspace, targetPath));
+      return editFileTool(input, { cwd: workspace.root, root: workspace.root, agentsNotice });
+    },
   );
 
   server.registerTool(
     "grep_files",
     {
       title: "Grep files",
-      description: "Search file contents under an allowed local root.",
+      description:
+        "Search file contents inside an open workspace. Call open_workspace first and pass workspaceId.",
       inputSchema: {
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
         pattern: z.string().describe("Search pattern."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
-        path: z.string().optional().describe("Optional path or glob scope relative to cwd."),
+        path: z.string().optional().describe("Optional path or glob scope relative to the workspace root."),
         include: z.string().optional().describe("Optional include glob."),
       },
       annotations: { readOnlyHint: true },
     },
-    async (input) => grepFilesTool(input, config),
+    async ({ workspaceId, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const targetPath = input.path ? workspaces.resolvePath(workspace, input.path) : workspace.root;
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForPath(workspace, targetPath));
+      return grepFilesTool(input, { cwd: workspace.root, root: workspace.root, agentsNotice });
+    },
   );
 
   server.registerTool(
     "find_files",
     {
       title: "Find files",
-      description: "Find files by glob pattern under an allowed local root.",
+      description: "Find files by glob pattern inside an open workspace. Call open_workspace first and pass workspaceId.",
       inputSchema: {
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
         pattern: z.string().describe("File glob pattern."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
-        path: z.string().optional().describe("Optional path scope relative to cwd."),
+        path: z.string().optional().describe("Optional path scope relative to the workspace root."),
       },
       annotations: { readOnlyHint: true },
     },
-    async (input) => findFilesTool(input, config),
+    async ({ workspaceId, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const targetPath = input.path ? workspaces.resolvePath(workspace, input.path) : workspace.root;
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForPath(workspace, targetPath));
+      return findFilesTool(input, { cwd: workspace.root, root: workspace.root, agentsNotice });
+    },
   );
 
   server.registerTool(
     "list_directory",
     {
       title: "List directory",
-      description: "List a directory under an allowed local root.",
+      description: "List a directory inside an open workspace. Call open_workspace first and pass workspaceId.",
       inputSchema: {
-        path: z.string().describe("Directory path to list, relative to cwd or absolute within an allowed root."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
+        path: z.string().describe("Directory path to list, relative to the workspace root."),
       },
       annotations: { readOnlyHint: true },
     },
-    async (input) => listDirectoryTool(input, config),
+    async ({ workspaceId, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const targetPath = workspaces.resolvePath(workspace, input.path);
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForPath(workspace, targetPath));
+      return listDirectoryTool(input, { cwd: workspace.root, root: workspace.root, agentsNotice });
+    },
   );
 
   server.registerTool(
@@ -172,15 +249,24 @@ function createMcpServer(config: ServerConfig): McpServer {
     {
       title: "Run shell",
       description:
-        "Run a shell command in an allowed working directory. This is powerful local execution and should only be exposed behind strong authentication.",
+        "Run a shell command inside an open workspace. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.",
       inputSchema: {
+        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
         command: z.string().describe("Shell command to run."),
-        cwd: z.string().optional().describe("Working directory within an allowed root."),
+        workingDirectory: z
+          .string()
+          .optional()
+          .describe("Optional working directory relative to the workspace root. Defaults to the workspace root."),
         timeout: z.number().positive().max(300).optional().describe("Timeout in seconds. Defaults to 30, max 300."),
       },
       annotations: { destructiveHint: true },
     },
-    async (input) => runShellTool(input, config),
+    async ({ workspaceId, workingDirectory, ...input }) => {
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const cwd = workspaces.resolveWorkingDirectory(workspace, workingDirectory);
+      const agentsNotice = formatAgentsNotice(await workspaces.loadAgentsForDirectory(workspace, cwd));
+      return runShellTool(input, { cwd, root: workspace.root, agentsNotice });
+    },
   );
 
   return server;
