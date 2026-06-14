@@ -1,10 +1,7 @@
-import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { openDatabase, type DatabaseHandle } from "./db/client.js";
 import {
-  loadedAgentFiles,
   workspaceSessions,
-  type LoadedAgentFileRow,
   type WorkspaceSessionRow,
 } from "./db/schema.js";
 
@@ -23,14 +20,6 @@ export interface WorkspaceSession {
   lastUsedAt: string;
 }
 
-export interface LoadedAgentFileState {
-  path: string;
-  content: string;
-  contentHash: string;
-  loadedAt: string;
-  lastSeenAt: string;
-}
-
 export interface WorkspaceStore {
   createSession(input: {
     id: string;
@@ -43,12 +32,6 @@ export interface WorkspaceStore {
   }): WorkspaceSession;
   getSession(id: string): WorkspaceSession | undefined;
   touchSession(id: string): void;
-  listLoadedAgentFiles(workspaceSessionId: string): LoadedAgentFileState[];
-  putLoadedAgentFile(input: {
-    workspaceSessionId: string;
-    path: string;
-    content: string;
-  }): LoadedAgentFileState;
   close?(): void;
 }
 
@@ -118,65 +101,6 @@ export class SqliteWorkspaceStore implements WorkspaceStore {
       .set({ lastUsedAt: new Date().toISOString() })
       .where(eq(workspaceSessions.id, id))
       .run();
-  }
-
-  listLoadedAgentFiles(workspaceSessionId: string): LoadedAgentFileState[] {
-    return this.database.db
-      .select()
-      .from(loadedAgentFiles)
-      .where(eq(loadedAgentFiles.workspaceSessionId, workspaceSessionId))
-      .all()
-      .map(rowToLoadedAgentFileState);
-  }
-
-  putLoadedAgentFile(input: {
-    workspaceSessionId: string;
-    path: string;
-    content: string;
-  }): LoadedAgentFileState {
-    const now = new Date().toISOString();
-    const contentHash = hashContent(input.content);
-    const existing = this.database.db
-      .select()
-      .from(loadedAgentFiles)
-      .where(
-        and(
-          eq(loadedAgentFiles.workspaceSessionId, input.workspaceSessionId),
-          eq(loadedAgentFiles.path, input.path),
-        ),
-      )
-      .get();
-
-    const loadedAt = existing?.loadedAt ?? now;
-    const state: LoadedAgentFileState = {
-      path: input.path,
-      content: input.content,
-      contentHash,
-      loadedAt,
-      lastSeenAt: now,
-    };
-
-    this.database.db
-      .insert(loadedAgentFiles)
-      .values({
-        workspaceSessionId: input.workspaceSessionId,
-        path: state.path,
-        contentHash: state.contentHash,
-        content: state.content,
-        loadedAt: state.loadedAt,
-        lastSeenAt: state.lastSeenAt,
-      })
-      .onConflictDoUpdate({
-        target: [loadedAgentFiles.workspaceSessionId, loadedAgentFiles.path],
-        set: {
-          contentHash: state.contentHash,
-          content: state.content,
-          lastSeenAt: state.lastSeenAt,
-        },
-      })
-      .run();
-
-    return state;
   }
 
   close(): void {
@@ -255,18 +179,4 @@ function rowToWorkspaceSession(row: WorkspaceSessionRow): WorkspaceSession {
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
   };
-}
-
-function rowToLoadedAgentFileState(row: LoadedAgentFileRow): LoadedAgentFileState {
-  return {
-    path: row.path,
-    content: row.content,
-    contentHash: row.contentHash,
-    loadedAt: row.loadedAt,
-    lastSeenAt: row.lastSeenAt,
-  };
-}
-
-function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
 }

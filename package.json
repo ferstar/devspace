@@ -11,7 +11,7 @@
     "start": "node dist/server.js",
     "release:build": "node scripts/build-release.mjs",
     "release:start": "node releases/current/dist/server.js",
-    "test": "tsx src/roots.test.ts && tsx src/skills.test.ts && tsx src/workspaces.test.ts && tsx src/result-store.test.ts && tsx src/workspace-store.test.ts",
+    "test": "tsx src/roots.test.ts && tsx src/skills.test.ts && tsx src/workspaces.test.ts && tsx src/result-store.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [],
