@@ -305,7 +305,6 @@ function createMcpServer(
       annotations: { readOnlyHint: true },
     },
     async ({ workspaceId, resultId }) => {
-      if (workspaceId) workspaces.getWorkspace(workspaceId);
       const result = results.get(resultId, workspaceId);
 
       return {
@@ -371,6 +370,7 @@ function createMcpServer(
       const storedResult = results.put({
         tool: "open_workspace",
         workspaceId: workspace.id,
+        workspaceRoot: workspace.root,
         label: workspace.root,
         path: workspace.root,
         summary,
@@ -495,6 +495,7 @@ function createMcpServer(
       };
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "read_file",
         path: input.path,
         label: input.path,
@@ -572,6 +573,7 @@ function createMcpServer(
       };
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "write_file",
         path: input.path,
         label: input.path,
@@ -665,6 +667,7 @@ function createMcpServer(
       const diffText = response.details?.patch ?? response.details?.diff ?? "";
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "edit_file",
         path: input.path,
         label: input.path,
@@ -767,6 +770,7 @@ function createMcpServer(
       };
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "grep_files",
         path: input.path,
         label: input.pattern,
@@ -850,6 +854,7 @@ function createMcpServer(
       };
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "find_files",
         path: input.path,
         label: input.pattern,
@@ -923,6 +928,7 @@ function createMcpServer(
       const summary = textSummary(response.content);
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "list_directory",
         path: input.path,
         label: input.path,
@@ -1015,6 +1021,7 @@ function createMcpServer(
       };
       const storedResult = results.put({
         workspaceId,
+        workspaceRoot: workspace.root,
         tool: "run_shell",
         path: workingDirectory,
         label: input.command,
