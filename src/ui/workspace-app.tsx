@@ -35,6 +35,7 @@ interface MountedPayload {
     card: ToolResultCard;
     hostContext?: HostContext;
     errorMessage?: string | null;
+    visibleFileCount?: number;
   }): void;
   unmount(): void;
 }
@@ -215,7 +216,7 @@ function renderEmpty(message: string, tone: "muted" | "error" = "muted"): void {
 }
 
 async function renderPayloadIfNeeded(): Promise<void> {
-  if (!expanded || !card || !currentPayloadContainer) return;
+  if (!card || !currentPayloadContainer || (!expanded && !isReviewTool(card.tool))) return;
 
   const target = currentPayloadContainer;
 
@@ -244,6 +245,30 @@ async function renderPayloadIfNeeded(): Promise<void> {
       card,
       hostContext,
       errorMessage,
+    });
+    return;
+  }
+
+  if (isReviewTool(card.tool)) {
+    const visibleFileCount = reviewFilesExpanded
+      ? undefined
+      : Math.max(3, (card.files ?? []).slice(0, 3).length);
+
+    if (currentPayload) {
+      currentPayload.update({ card, hostContext, errorMessage, visibleFileCount });
+      return;
+    }
+
+    renderStatus(target, "Loading review...");
+
+    const { mountReviewPayload } = await import("./review-payload.js");
+    if (target !== currentPayloadContainer || !card) return;
+
+    currentPayload = mountReviewPayload(target, {
+      card,
+      hostContext,
+      errorMessage,
+      visibleFileCount,
     });
     return;
   }
@@ -348,20 +373,7 @@ function renderReviewCard(card: ToolResultCard, display: ToolDisplay): void {
   header.append(icon, titleGroup, renderSummaryBadge(card));
 
   const body = element("div", { className: "review-summary" });
-  const list = element("div", { className: "review-file-list" });
-  for (const file of visibleFiles) {
-    const row = element("div", { className: "review-file-row" });
-    row.append(
-      element("span", { className: "review-file-path", text: file.path ?? "unknown" }),
-      element("span", { className: "review-file-stats add", text: `+${String(file.additions ?? 0)}` }),
-      element("span", { className: "review-file-stats remove", text: `-${String(file.removals ?? 0)}` }),
-    );
-    list.append(row);
-  }
-  if (files.length === 0) {
-    list.append(element("div", { className: "review-empty", text: "No file changes." }));
-  }
-  body.append(list);
+  currentPayloadContainer = body;
 
   const actions = element("div", { className: "review-actions" });
   if (hiddenCount > 0) {
@@ -384,6 +396,7 @@ function renderReviewCard(card: ToolResultCard, display: ToolDisplay): void {
 
   main.append(section);
   appRoot.replaceChildren(main);
+  renderPayloadIfNeeded();
 }
 
 function renderChevron(isExpanded: boolean, visible: boolean): HTMLElement {
