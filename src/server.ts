@@ -824,10 +824,7 @@ function createMcpServer(
           .optional()
           .describe("Defaults to true. When true, advances the last_review checkpoint to the current workspace state."),
       },
-      outputSchema: resultOutputSchema({
-        summary: reviewSummaryOutputSchema,
-        files: z.array(reviewFileOutputSchema),
-      }),
+      outputSchema: resultOutputSchema(),
       ...toolWidgetDescriptorMeta(config, "review_changes"),
       annotations: { readOnlyHint: true },
     },
@@ -857,8 +854,6 @@ function createMcpServer(
         },
         structuredContent: {
           result: contentText(content),
-          summary: review.summary,
-          files: review.files,
         },
       };
     },
