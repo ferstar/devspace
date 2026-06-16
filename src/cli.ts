@@ -135,6 +135,8 @@ async function runInit({ force }: { force: boolean }): Promise<void> {
     const lines = [
       `Config: ${configPath}`,
       `Auth: ${authPath}`,
+      "Owner password: generated in the auth file",
+      "Use it when ChatGPT or Claude asks you to approve DevSpace access.",
       `Local MCP URL: http://${config.host}:${config.port}/mcp`,
       ...(publicBaseUrl ? [`Public MCP URL: ${publicBaseUrl}/mcp`] : []),
     ];
@@ -174,7 +176,7 @@ async function serve(): Promise<void> {
     if (config.allowedHosts.includes("*")) {
       console.warn("warning: Host header allowlist is disabled because DEVSPACE_ALLOWED_HOSTS=*");
     }
-    console.log("auth: oauth owner-token flow required");
+    console.log("auth: Owner password approval required");
     console.log(`logging: ${config.logging.level} ${config.logging.format}`);
   });
 

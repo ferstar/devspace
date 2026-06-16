@@ -113,7 +113,7 @@ function formHtml(params: {
       </dl>
       <form method="post">
 ${hiddenFields}
-        <label for="owner_token">Local owner token</label>
+        <label for="owner_token">Owner password</label>
         <input id="owner_token" name="owner_token" type="password" autocomplete="current-password" autofocus required />
         <button type="submit">Authorize DevSpace</button>
       </form>
@@ -213,7 +213,7 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
       res.status(401).setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(
         formHtml({
-          error: "The owner token was not accepted.",
+          error: "The Owner password was not accepted.",
           clientName: client.client_name ?? client.client_id,
           scopes: params.scopes ?? this.config.scopes,
           resource: params.resource,

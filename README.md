@@ -149,8 +149,9 @@ The default config files are:
 ~/.devspace/auth.json
 ```
 
-`auth.json` contains the generated owner token used by the local OAuth approval
-screen. Keep it private.
+`auth.json` contains the generated Owner password used by the local approval
+screen. Keep it private. You will need that password when ChatGPT or Claude asks
+you to approve DevSpace access.
 
 For temporary tunnel or reverse-proxy URLs, keep the URL out of persistent
 config and pass it for that run:
@@ -232,8 +233,8 @@ DevSpace now uses an embedded single-user OAuth flow instead of the old static
 /.well-known/oauth-authorization-server
 ```
 
-When ChatGPT opens the authorization URL, DevSpace shows a local owner-token
-approval screen. Enter `DEVSPACE_OAUTH_OWNER_TOKEN` there to approve the
+When ChatGPT opens the authorization URL, DevSpace shows a local Owner password
+approval screen. Enter the generated Owner password there to approve the
 connection. The issued OAuth access token is short-lived, resource-bound to the
 configured `/mcp` endpoint, and must be sent by the MCP client as a normal
 `Authorization: Bearer <oauth-access-token>` header.
@@ -267,7 +268,7 @@ If your tunnel URL changes every run, pass the new URL through
 This server exposes local filesystem and shell capabilities. Treat it like
 remote code execution on this machine.
 
-- Let `devspace init` generate the owner token, or set a long random
+- Let `devspace init` generate the Owner password, or set a long random
   `DEVSPACE_OAUTH_OWNER_TOKEN` for env-driven deployments.
 - Keep `DEVSPACE_ALLOWED_ROOTS` narrow.
 - `DEVSPACE_ALLOWED_HOSTS` is derived from `DEVSPACE_PUBLIC_BASE_URL` by default.
