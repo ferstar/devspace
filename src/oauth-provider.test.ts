@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { SingleUserOAuthProvider, type OAuthConfig } from "./oauth-provider.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 const root = mkdtempSync(join(tmpdir(), "devspace-oauth-provider-test-"));
-const statePath = join(root, "oauth.json");
 const resourceServerUrl = new URL("https://devspace.example.com/mcp");
 const config: OAuthConfig = {
   ownerToken: "owner-token-that-is-long-enough",
@@ -15,11 +14,10 @@ const config: OAuthConfig = {
   refreshTokenTtlSeconds: 2592000,
   scopes: ["devspace"],
   allowedRedirectHosts: ["localhost"],
-  statePath,
 };
 
 try {
-  const firstProvider = new SingleUserOAuthProvider(config, resourceServerUrl);
+  const firstProvider = new SingleUserOAuthProvider(config, resourceServerUrl, root);
   const client = firstProvider.clientsStore.registerClient({
     client_name: "test client",
     redirect_uris: ["http://localhost/callback"],
@@ -31,22 +29,14 @@ try {
     resource?: URL,
   ) => OAuthTokens;
   const firstTokens = issueTokens.call(firstProvider, client.client_id, ["devspace"], resourceServerUrl);
+  firstProvider.close();
 
-  const savedState = JSON.parse(readFileSync(statePath, "utf8"));
-  assert.equal(savedState.clients.length, 1);
-  assert.equal(savedState.accessTokens, undefined);
-  assert.equal(savedState.refreshTokens.length, 1);
-  assert.equal(savedState.refreshTokens[0].token, undefined);
-  assert.equal(savedState.refreshTokens[0].resource, resourceServerUrl.href);
-
-  const secondProvider = new SingleUserOAuthProvider(config, resourceServerUrl);
+  const secondProvider = new SingleUserOAuthProvider(config, resourceServerUrl, root);
   const persistedClient = secondProvider.clientsStore.getClient(client.client_id);
   assert.equal(persistedClient?.client_id, client.client_id);
 
-  await assert.rejects(
-    () => secondProvider.verifyAccessToken(firstTokens.access_token),
-    InvalidTokenError,
-  );
+  const verified = await secondProvider.verifyAccessToken(firstTokens.access_token);
+  assert.equal(verified.clientId, client.client_id);
 
   const secondTokens = await secondProvider.exchangeRefreshToken(
     client,
@@ -56,11 +46,11 @@ try {
   );
   assert.equal(Boolean(secondTokens.refresh_token), true);
   assert.notEqual(secondTokens.refresh_token, firstTokens.refresh_token);
-
-  const rotatedState = JSON.parse(readFileSync(statePath, "utf8"));
-  assert.equal(rotatedState.clients.length, 1);
-  assert.equal(rotatedState.accessTokens, undefined);
-  assert.equal(rotatedState.refreshTokens.length, 1);
+  await assert.rejects(
+    () => secondProvider.exchangeRefreshToken(client, assertString(firstTokens.refresh_token), undefined, resourceServerUrl),
+    InvalidGrantError,
+  );
+  secondProvider.close();
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

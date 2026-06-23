@@ -236,16 +236,28 @@ async function renderPayloadIfNeeded(): Promise<void> {
       return;
     }
 
-    renderStatus(target, "Loading details...");
+    setPayloadLoading(target, true);
 
-    const { mountHeavyPayload } = await import("./heavy-payload.js");
-    if (target !== currentPayloadContainer || !expanded || !card) return;
+    try {
+      const { mountHeavyPayload } = await import("./heavy-payload.js");
+      if (target !== currentPayloadContainer || !expanded || !card) return;
 
-    currentPayload = mountHeavyPayload(target, {
-      card,
-      hostContext,
-      errorMessage,
-    });
+      setPayloadLoading(target, false);
+      currentPayload = mountHeavyPayload(target, {
+        card,
+        hostContext,
+        errorMessage,
+      });
+    } catch (loadError) {
+      if (target !== currentPayloadContainer || !expanded) return;
+
+      setPayloadLoading(target, false);
+      renderStatus(
+        target,
+        loadError instanceof Error ? loadError.message : "Unable to load details.",
+        "error",
+      );
+    }
     return;
   }
 
@@ -425,6 +437,20 @@ function renderChevron(isExpanded: boolean, visible: boolean): HTMLElement {
   }
 
   return chevron;
+}
+
+function setPayloadLoading(container: HTMLElement, loading: boolean): void {
+  const header = container.previousElementSibling;
+  const chevron = header?.querySelector<HTMLElement>(".chevron");
+  if (!chevron) return;
+
+  chevron.classList.toggle("loading", loading);
+  chevron.innerHTML = loading
+    ? iconSvg('<circle cx="12" cy="12" r="8" />')
+    : iconSvg('<path d="m6 9 6 6 6-6" />');
+
+  const button = header instanceof HTMLButtonElement ? header : null;
+  if (button) button.setAttribute("aria-busy", String(loading));
 }
 
 function workspacePayloadText(card: ToolResultCard): string {
