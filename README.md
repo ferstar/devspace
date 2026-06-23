@@ -62,7 +62,7 @@ DevSpace requires Node `>=20.12 <27`. Node 22 LTS is recommended.
 Install the DevSpace CLI:
 
 ```bash
-npm install -g @waishnav/devspace
+pnpm add -g @waishnav/devspace
 ```
 
 Then initialize and start the server:
@@ -75,8 +75,8 @@ devspace serve
 Or run it without a global install:
 
 ```bash
-npx @waishnav/devspace init
-npx @waishnav/devspace serve
+pnpm dlx @waishnav/devspace init
+pnpm dlx @waishnav/devspace serve
 ```
 
 During setup, DevSpace asks for:
@@ -156,8 +156,8 @@ shell.
 
 | Platform                                          | Status            | Notes                                          |
 | ------------------------------------------------- | ----------------- | ---------------------------------------------- |
-| Linux                                             | Supported         | Requires Node, npm, Git, and Bash.             |
-| macOS                                             | Supported         | Requires Node, npm, Git, and Bash.             |
+| Linux                                             | Supported         | Requires Node, pnpm, Git, and Bash.            |
+| macOS                                             | Supported         | Requires Node, pnpm, Git, and Bash.            |
 | Windows with Git Bash, WSL, MSYS2, or Cygwin Bash | Supported         | Git Bash is the simplest native Windows setup. |
 | Windows PowerShell or `cmd.exe` only              | Not supported yet | Install Git Bash or use WSL.                   |
 
@@ -233,10 +233,10 @@ between, come hang out with me on [X](https://x.com/wshxnv).
 For working on DevSpace itself:
 
 ```bash
-npm install --include=dev
-npm run dev
-npm run typecheck
-npm test
-npm run build
-npm run start
+pnpm install
+pnpm dev
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm start
 ```

@@ -13,17 +13,17 @@ The default files are:
 Use another config directory with:
 
 ```bash
-DEVSPACE_CONFIG_DIR=/path/to/config npx @waishnav/devspace serve
+DEVSPACE_CONFIG_DIR=/path/to/config pnpm dlx @waishnav/devspace serve
 ```
 
 ## Commands
 
 ```bash
-npx @waishnav/devspace init
-npx @waishnav/devspace serve
-npx @waishnav/devspace doctor
-npx @waishnav/devspace config get
-npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
+pnpm dlx @waishnav/devspace init
+pnpm dlx @waishnav/devspace serve
+pnpm dlx @waishnav/devspace doctor
+pnpm dlx @waishnav/devspace config get
+pnpm dlx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
 ```
 
 ## Core Environment Variables
@@ -85,7 +85,7 @@ MCP clients discover metadata from:
 | Value | Behavior |
 | --- | --- |
 | `full` | Default. Widget UI is attached to exposed workspace, file, edit, and shell tools. |
-| `changes` | Enables the aggregate `show_changes` tool and attaches widget UI to `open_workspace` and `show_changes`. |
+| `changes` | Attaches widget UI to `open_workspace` and `show_changes`. |
 | `off` | Disables widget UI. |
 
 ## Skills
@@ -100,7 +100,7 @@ Example:
 
 ```bash
 DEVSPACE_SKILL_PATHS="$HOME/.codex/skills,$HOME/.claude/skills" \
-npx @waishnav/devspace serve
+pnpm dlx @waishnav/devspace serve
 ```
 
 ## Logging
@@ -130,7 +130,7 @@ DEVSPACE_WORKTREE_ROOT="$HOME/.devspace/worktrees" \
 DEVSPACE_TOOL_MODE="minimal" \
 DEVSPACE_TOOL_NAMING="short" \
 DEVSPACE_WIDGETS="full" \
-npx @waishnav/devspace serve
+pnpm dlx @waishnav/devspace serve
 ```
 
 The environment assignments must be part of the same command invocation, or

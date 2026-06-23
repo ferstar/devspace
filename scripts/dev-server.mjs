@@ -19,7 +19,7 @@ function log(message) {
 
 function start() {
   stoppingForRestart = false;
-  child = spawn("npx", ["tsx", "src/cli.ts", "serve"], {
+  child = spawn("pnpm", ["exec", "tsx", "src/cli.ts", "serve"], {
     cwd: repoRoot,
     env: process.env,
     stdio: "inherit",

@@ -171,7 +171,7 @@ async function serve(): Promise<void> {
         sqliteStatus,
         "",
         "Try reinstalling or rebuilding dependencies under the active Node version:",
-        "  npm rebuild better-sqlite3",
+        "  pnpm rebuild better-sqlite3",
       ].join("\n"),
     );
   }

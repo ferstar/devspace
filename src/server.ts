@@ -39,6 +39,7 @@ import { createReviewCheckpointManager } from "./review-checkpoints.js";
 import { formatPathForPrompt } from "./skills.js";
 import { createWorkspaceStore } from "./workspace-store.js";
 import { formatAgentsPath, WorkspaceRegistry } from "./workspaces.js";
+import { gitStatus, gitDiff, gitLog } from "./git.js";
 
 type Transport = StreamableHTTPServerTransport;
 const WORKSPACE_APP_URI = "ui://devspace/workspace-app.html";
@@ -197,10 +198,10 @@ function serverInstructions(config: ServerConfig, toolNames: ToolNames): string 
 
   const showChanges =
     config.widgets === "changes"
-      ? " After creating, editing, or overwriting files, call show_changes once after the related file changes are complete so the user can see the aggregate diff."
-      : "";
+      ? " After creating, editing, or overwriting files, call show_changes to review the aggregate diff since the last checkpoint."
+      : " Call show_changes to review workspace changes since the last checkpoint.";
 
-  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${showChanges}`;
+  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, edit_files for multi-file changes, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Use git_status, git_diff, and git_log for structured Git operations instead of shell commands. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${showChanges}`;
 }
 function resultOutputSchema(extra: z.ZodRawShape = {}): z.ZodRawShape {
   return {
@@ -325,6 +326,25 @@ function contentLineCount(content: string): number {
   return content.endsWith("\n")
     ? content.slice(0, -1).split("\n").length
     : content.split("\n").length;
+}
+
+interface TruncationFields {
+  truncated: boolean;
+  truncatedBy: "lines" | "bytes" | null;
+  totalLines: number;
+  totalBytes: number;
+  outputLines: number;
+  outputBytes: number;
+  maxLines: number;
+  maxBytes: number;
+}
+
+function truncationNote(t: TruncationFields | undefined): string {
+  if (!t?.truncated) return "";
+  const limit = t.truncatedBy === "bytes"
+    ? `${(t.maxBytes / 1024).toFixed(0)}KB`
+    : `${t.maxLines} lines`;
+  return `\n\n[Output truncated at ${limit}. Showing ${t.outputLines} lines / ${(t.outputBytes / 1024).toFixed(1)}KB of ${t.totalLines} lines / ${(t.totalBytes / 1024).toFixed(1)}KB total.]`;
 }
 
 function countDiffStats(diff: string | undefined): DiffStats {
@@ -462,7 +482,7 @@ function createMcpServer(
     {
       name: "devspace",
       title: "DevSpace",
-      version: "0.1.0",
+      version: "1.0.2",
       description:
         "Secure local coding workspace for MCP clients. Provides workspace-scoped file, search, edit, write, and shell tools.",
     },
@@ -553,12 +573,10 @@ function createMcpServer(
     async ({ path, mode, baseRef }) => {
       const startedAt = performance.now();
       const { workspace, agentsFiles, availableAgentsFiles } = await workspaces.openWorkspace({ path, mode, baseRef });
-      if (config.widgets === "changes") {
-        void reviewCheckpoints.initializeWorkspace({
-          workspaceId: workspace.id,
-          root: workspace.root,
-        });
-      }
+      void reviewCheckpoints.initializeWorkspace({
+        workspaceId: workspace.id,
+        root: workspace.root,
+      });
       const visibleSkills = workspace.skills
         .filter((skill) => !skill.disableModelInvocation)
         .map((skill) => ({
@@ -706,6 +724,7 @@ function createMcpServer(
         ...textSummary(response.content),
         offset: input.offset ?? 1,
         limited: input.limit !== undefined,
+        truncated: response.details?.truncation?.truncated ?? false,
       };
       logToolCall(config, {
         tool: toolNames.read,
@@ -727,7 +746,7 @@ function createMcpServer(
           },
         },
         structuredContent: {
-          result: contentText(response.content),
+          result: contentText(response.content) + truncationNote(response.details?.truncation),
         },
       };
     },
@@ -897,10 +916,99 @@ function createMcpServer(
     },
   );
 
-  if (config.widgets === "changes") {
-    registerAppTool(
-      server,
-      "show_changes",
+  registerAppTool(
+    server,
+    "edit_files",
+    {
+      title: "Edit multiple files",
+      description:
+        `Edit multiple files inside an open workspace in a single operation. Each file entry contains a path and a list of oldText→newText replacements. All files are processed sequentially; if any file fails, the entire operation is reported as an error. Prefer this over individual ${toolNames.edit} calls when changes span multiple files. Call open_workspace first and pass workspaceId.`,
+      inputSchema: {
+        workspaceId: z
+          .string()
+          .describe("Workspace identifier returned by open_workspace."),
+        files: z
+          .array(
+            z.object({
+              path: z
+                .string()
+                .describe("File path to edit, relative to the workspace root."),
+              edits: z
+                .array(
+                  z.object({
+                    oldText: z
+                      .string()
+                      .describe("Exact text to replace. Must match uniquely in the original file."),
+                    newText: z.string().describe("Replacement text."),
+                  }),
+                )
+                .min(1),
+            }),
+          )
+          .min(1)
+          .max(20)
+          .describe("Up to 20 files can be edited in one call."),
+      },
+      outputSchema: resultOutputSchema(),
+      ...toolWidgetDescriptorMeta(config, "edit"),
+      annotations: EDIT_TOOL_ANNOTATIONS,
+    },
+    async ({ workspaceId, files }) => {
+      const startedAt = performance.now();
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const results: string[] = [];
+      let totalAdditions = 0;
+      let totalRemovals = 0;
+      let hasError = false;
+
+      for (const file of files) {
+        workspaces.resolvePath(workspace, file.path);
+        const response = await editFileTool(
+          { path: file.path, edits: file.edits },
+          { cwd: workspace.root, root: workspace.root },
+        );
+
+        if (response.isError) {
+          hasError = true;
+          results.push(`Failed: ${file.path} — ${contentText(response.content)}`);
+          break;
+        }
+
+        const stats = countDiffStats(response.details?.patch ?? response.details?.diff);
+        totalAdditions += stats.additions;
+        totalRemovals += stats.removals;
+        results.push(`Edited ${file.path} (+${stats.additions} -${stats.removals})`);
+      }
+
+      logToolCall(config, {
+        tool: "edit_files",
+        workspaceId,
+        success: !hasError,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+
+      if (hasError) {
+        return { content: results.map(textBlock), isError: true };
+      }
+
+      const summaryText = `Edited ${files.length} ${files.length === 1 ? "file" : "files"} (+${totalAdditions} -${totalRemovals}).`;
+      return {
+        content: [[summaryText], ...results].flat().map(textBlock),
+        _meta: {
+          tool: "edit_files",
+          card: {
+            workspaceId,
+            summary: { files: files.length, additions: totalAdditions, removals: totalRemovals },
+          },
+        },
+        structuredContent: { result: [summaryText, ...results].join("\n") },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "show_changes",
       {
         title: "Show changes",
         description:
@@ -924,42 +1032,188 @@ function createMcpServer(
       },
       async ({ workspaceId, since, markReviewed }) => {
         const startedAt = performance.now();
-        const workspace = workspaces.getWorkspace(workspaceId);
-        const review = await reviewCheckpoints.reviewChanges({
-          workspaceId,
-          root: workspace.root,
-          since: since ?? "last_shown",
-          markReviewed: markReviewed ?? true,
-        });
+        try {
+          const workspace = workspaces.getWorkspace(workspaceId);
+          const review = await reviewCheckpoints.reviewChanges({
+            workspaceId,
+            root: workspace.root,
+            since: since ?? "last_shown",
+            markReviewed: markReviewed ?? true,
+          });
 
-        const content = [textBlock(review.result)];
-        logToolCall(config, {
-          tool: "show_changes",
-          workspaceId,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-
-        return {
-          content,
-          _meta: {
+          const content = [textBlock(review.result)];
+          logToolCall(config, {
             tool: "show_changes",
-            card: {
-              workspaceId,
-              summary: review.summary,
-              files: review.files,
-              payload: {
-                patch: review.patch,
+            workspaceId,
+            success: true,
+            durationMs: Math.round(performance.now() - startedAt),
+          });
+
+          return {
+            content,
+            _meta: {
+              tool: "show_changes",
+              card: {
+                workspaceId,
+                summary: review.summary,
+                files: review.files,
+                payload: {
+                  patch: review.patch,
+                },
               },
             },
-          },
-          structuredContent: {
-            result: contentText(content),
-          },
-        };
+            structuredContent: {
+              result: contentText(content),
+            },
+          };
+        } catch (error) {
+          const errorContent = [textBlock(error instanceof Error ? error.message : String(error))];
+          logFailedToolResponse(config, {
+            tool: "show_changes",
+            workspaceId,
+          }, errorContent, startedAt);
+          return { content: errorContent, isError: true };
+        }
       },
     );
-  }
+
+  registerAppTool(
+    server,
+    "git_status",
+    {
+      title: "Git status",
+      description:
+        "Show the working tree status of a Git repository inside an open workspace. Provides a structured summary of staged, unstaged, and untracked changes. Call open_workspace first and pass workspaceId.",
+      inputSchema: {
+        workspaceId: z
+          .string()
+          .describe("Workspace identifier returned by open_workspace."),
+        short: z
+          .boolean()
+          .optional()
+          .describe("Use short format instead of the default porcelain+branch format."),
+      },
+      outputSchema: resultOutputSchema(),
+      ...toolWidgetDescriptorMeta(config, "shell"),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ workspaceId, short }) => {
+      const startedAt = performance.now();
+      const workspace = workspaces.getWorkspace(workspaceId);
+      const output = await gitStatus(workspace.root, { short });
+      logToolCall(config, {
+        tool: "git_status",
+        workspaceId,
+        success: true,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return {
+        content: [textBlock(output || "Clean working tree — no changes.")],
+        structuredContent: { result: output || "Clean working tree — no changes." },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "git_diff",
+    {
+      title: "Git diff",
+      description:
+        "Show the diff of changes in a Git repository inside an open workspace. Supports staged/unstaged diffs, comparing arbitrary refs, and scoping to a specific file path. Call open_workspace first and pass workspaceId.",
+      inputSchema: {
+        workspaceId: z
+          .string()
+          .describe("Workspace identifier returned by open_workspace."),
+        staged: z
+          .boolean()
+          .optional()
+          .describe("Show staged (index) changes instead of unstaged."),
+        from: z
+          .string()
+          .optional()
+          .describe("Base git ref (commit-ish, branch name, tag). Defaults to HEAD if to is also provided."),
+        to: z
+          .string()
+          .optional()
+          .describe("Target git ref. When used with from, shows changes from...to."),
+        path: z
+          .string()
+          .optional()
+          .describe("Scope the diff to a specific file path relative to the workspace root."),
+      },
+      outputSchema: resultOutputSchema(),
+      ...toolWidgetDescriptorMeta(config, "shell"),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ workspaceId, staged, from, to, path }) => {
+      const startedAt = performance.now();
+      const workspace = workspaces.getWorkspace(workspaceId);
+      let resolvedPath: string | undefined;
+      if (path) {
+        resolvedPath = workspaces.resolvePath(workspace, path);
+      }
+      const output = await gitDiff(workspace.root, { staged, from, to, path: resolvedPath });
+      logToolCall(config, {
+        tool: "git_diff",
+        workspaceId,
+        success: true,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return {
+        content: [textBlock(output || "No differences.")],
+        structuredContent: { result: output || "No differences." },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "git_log",
+    {
+      title: "Git log",
+      description:
+        "Show the commit log of a Git repository inside an open workspace. Defaults to the last 10 commits in oneline format. Call open_workspace first and pass workspaceId.",
+      inputSchema: {
+        workspaceId: z
+          .string()
+          .describe("Workspace identifier returned by open_workspace."),
+        count: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .optional()
+          .describe("Number of recent commits to show. Defaults to 10, max 100."),
+        path: z
+          .string()
+          .optional()
+          .describe("Scope the log to commits affecting a specific file path relative to the workspace root."),
+      },
+      outputSchema: resultOutputSchema(),
+      ...toolWidgetDescriptorMeta(config, "shell"),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ workspaceId, count, path }) => {
+      const startedAt = performance.now();
+      const workspace = workspaces.getWorkspace(workspaceId);
+      let resolvedPath: string | undefined;
+      if (path) {
+        resolvedPath = workspaces.resolvePath(workspace, path);
+      }
+      const output = await gitLog(workspace.root, { count: count ?? 10, path: resolvedPath });
+      logToolCall(config, {
+        tool: "git_log",
+        workspaceId,
+        success: true,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return {
+        content: [textBlock(output || "No commits found.")],
+        structuredContent: { result: output || "No commits found." },
+      };
+    },
+  );
 
   if (!config.minimalTools) {
     registerAppTool(
@@ -1008,6 +1262,7 @@ function createMcpServer(
           pattern: input.pattern,
           scope: input.path ?? ".",
           ...textSummary(response.content),
+          truncated: response.details?.truncation?.truncated ?? false,
         };
         logToolCall(config, {
           tool: toolNames.grep,
@@ -1029,7 +1284,7 @@ function createMcpServer(
             },
           },
           structuredContent: {
-            result: contentText(response.content),
+            result: contentText(response.content) + truncationNote(response.details?.truncation),
           },
         };
       },
@@ -1078,6 +1333,7 @@ function createMcpServer(
           pattern: input.pattern,
           scope: input.path ?? ".",
           ...textSummary(response.content),
+          truncated: response.details?.truncation?.truncated ?? false,
         };
         logToolCall(config, {
           tool: toolNames.glob,
@@ -1099,7 +1355,7 @@ function createMcpServer(
             },
           },
           structuredContent: {
-            result: contentText(response.content),
+            result: contentText(response.content) + truncationNote(response.details?.truncation),
           },
         };
       },
@@ -1144,7 +1400,10 @@ function createMcpServer(
           return response;
         }
 
-        const summary = textSummary(response.content);
+        const summary = {
+          ...textSummary(response.content),
+          truncated: response.details?.truncation?.truncated ?? false,
+        };
         logToolCall(config, {
           tool: toolNames.ls,
           workspaceId,
@@ -1165,7 +1424,7 @@ function createMcpServer(
             },
           },
           structuredContent: {
-            result: contentText(response.content),
+            result: contentText(response.content) + truncationNote(response.details?.truncation),
           },
         };
       },
@@ -1233,6 +1492,7 @@ function createMcpServer(
         command: input.command,
         workingDirectory: workingDirectory ?? ".",
         ...textSummary(response.content),
+        truncated: response.details?.truncation?.truncated ?? false,
       };
       logToolCall(config, {
         tool: toolNames.shell,
@@ -1256,7 +1516,7 @@ function createMcpServer(
           },
         },
         structuredContent: {
-          result: contentText(response.content),
+          result: contentText(response.content) + truncationNote(response.details?.truncation),
         },
       };
     },
@@ -1286,9 +1546,7 @@ export function createServer(config = loadConfig()): RunningServer {
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
 
-  if (config.logging.trustProxy) {
-    app.set("trust proxy", true);
-  }
+  app.set("trust proxy", true);
 
   app.use((req, res, next) => {
     const requestId = randomUUID();

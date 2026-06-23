@@ -9,6 +9,11 @@ import {
   type BashToolInput,
   type EditToolInput,
   type EditToolDetails,
+  type ReadToolDetails,
+  type BashToolDetails,
+  type GrepToolDetails,
+  type FindToolDetails,
+  type LsToolDetails,
   type FindToolInput,
   type GrepToolInput,
   type LsToolInput,
@@ -66,7 +71,7 @@ async function runTool<TInput, TDetails = unknown>(
   }
 }
 
-export async function readFileTool(input: ReadToolInput, context: ToolContext): Promise<ToolResponse> {
+export async function readFileTool(input: ReadToolInput, context: ToolContext): Promise<ToolResponse<ReadToolDetails | undefined>> {
   const path = resolveAllowedPath(input.path, context.cwd, context.readRoots ?? [context.root]);
   const tool = createReadTool(context.cwd);
 
@@ -97,28 +102,28 @@ export async function editFileTool(input: EditToolInput, context: ToolContext): 
   }, context);
 }
 
-export async function grepFilesTool(input: GrepToolInput, context: ToolContext): Promise<ToolResponse> {
+export async function grepFilesTool(input: GrepToolInput, context: ToolContext): Promise<ToolResponse<GrepToolDetails | undefined>> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createGrepTool(context.cwd);
 
   return runTool((params) => tool.execute("grep_files", params), input, context);
 }
 
-export async function findFilesTool(input: FindToolInput, context: ToolContext): Promise<ToolResponse> {
+export async function findFilesTool(input: FindToolInput, context: ToolContext): Promise<ToolResponse<FindToolDetails | undefined>> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createFindTool(context.cwd);
 
   return runTool((params) => tool.execute("find_files", params), input, context);
 }
 
-export async function listDirectoryTool(input: LsToolInput, context: ToolContext): Promise<ToolResponse> {
+export async function listDirectoryTool(input: LsToolInput, context: ToolContext): Promise<ToolResponse<LsToolDetails | undefined>> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createLsTool(context.cwd);
 
   return runTool((params) => tool.execute("list_directory", params), input, context);
 }
 
-export async function runShellTool(input: BashToolInput, context: ToolContext): Promise<ToolResponse> {
+export async function runShellTool(input: BashToolInput, context: ToolContext): Promise<ToolResponse<BashToolDetails | undefined>> {
   const tool = createBashTool(context.cwd);
   const timeout = input.timeout === undefined ? 30 : Math.min(input.timeout, 300);
 

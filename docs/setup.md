@@ -6,7 +6,7 @@ projects through DevSpace.
 ## Requirements
 
 - Node `>=20.12 <27`; Node 22 LTS is recommended
-- npm
+- pnpm
 - Git
 - Bash, including Git Bash or WSL on Windows
 - a public HTTPS URL that forwards to the local DevSpace server
@@ -19,7 +19,7 @@ ngrok, Pinggy, Tailscale Funnel, or your own HTTPS reverse proxy.
 Run:
 
 ```bash
-npx @waishnav/devspace init
+pnpm dlx @waishnav/devspace init
 ```
 
 The setup flow asks one question at a time.
@@ -79,20 +79,20 @@ https://your-tunnel-host.example.com/mcp
 Run:
 
 ```bash
-npx @waishnav/devspace serve
+pnpm dlx @waishnav/devspace serve
 ```
 
 If your tunnel URL changes for one run, override it without rewriting config:
 
 ```bash
-DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" npx @waishnav/devspace serve
+DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" pnpm dlx @waishnav/devspace serve
 ```
 
 For a stable public URL, persist it:
 
 ```bash
-npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
-npx @waishnav/devspace serve
+pnpm dlx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
+pnpm dlx @waishnav/devspace serve
 ```
 
 ## Approve The Client
@@ -114,7 +114,7 @@ Keep `auth.json` private.
 Run:
 
 ```bash
-npx @waishnav/devspace doctor
+pnpm dlx @waishnav/devspace doctor
 ```
 
 The doctor command reports the resolved config, Node version, Node ABI, platform,
@@ -125,8 +125,8 @@ Git, Bash, public URL, allowed hosts, and SQLite native dependency status.
 If you are developing DevSpace itself instead of using the published package:
 
 ```bash
-npm install --include=dev
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 The same setup rules apply.
